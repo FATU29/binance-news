@@ -1,0 +1,145 @@
+version: "3.8"
+
+services:
+  # Crawl Service
+  crawl-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crypto-crawl-service
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      # Server Configuration
+      - SERVER_PORT=9000
+      - ENVIRONMENT=production
+      - READ_TIMEOUT=10
+      - WRITE_TIMEOUT=10
+
+      # Crawler Configuration
+      - CRAWLER_WORKERS=5
+      - REQUEST_TIMEOUT=30
+      - RATE_LIMIT_PER_MIN=60
+      - USER_AGENT=CryptoNewsCrawler/1.0
+      - MAX_RETRIES=3
+      - RETRY_DELAY=2
+      - CRAWL_INTERVAL=300
+      - MAX_CONCURRENT_JOBS=10
+
+      # AI Service Integration
+      - AI_SERVICE_URL=http://ai-service:8000
+
+      # Database Configuration (when ready)
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=crypto_password
+      - DB_NAME=crypto_news
+      - DB_SSL_MODE=disable
+    networks:
+      - crypto-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9000/health",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - crawl-logs:/app/logs
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: crypto-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=crypto_password
+      - POSTGRES_DB=crypto_news
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - crypto-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: crypto-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - crypto-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Python AI Service (Optional)
+  ai-service:
+    image: python:3.11-slim
+    container_name: crypto-ai-service
+    restart: unless-stopped
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+      - ENVIRONMENT=production
+    volumes:
+      - ../ai:/app
+    command: >
+      sh -c "
+        pip install --no-cache-dir fastapi uvicorn openai transformers torch &&
+        uvicorn main:app --host 0.0.0.0 --port 8000
+      "
+    networks:
+      - crypto-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import requests; requests.get('http://localhost:8000/health')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+networks:
+  crypto-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  crawl-logs:

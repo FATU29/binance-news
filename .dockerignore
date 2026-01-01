@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+ARCHITECTURE_DIAGRAM.md
+API_DOCUMENTATION.md
+INTEGRATION_GUIDE.md
+IMPLEMENTATION_COMPLETE.md
+
+# Build artifacts
+bin/
+tmp/
+*.log
+logs/
+
+# Development
+.air.toml
+Makefile
+setup_files.sh
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+
+# Test files
+*_test.go
+testdata/
+
+# OS
+.DS_Store
+Thumbs.db
