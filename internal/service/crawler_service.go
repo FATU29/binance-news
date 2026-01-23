@@ -19,6 +19,7 @@ type CrawlerService struct {
 	crawler        *crawler.Crawler
 	qualityService *ContentQualityService
 	aiService      *AIService
+	aiHTMLParser   *AIHTMLParser
 	isRunning      bool
 	currentJobID   string
 	totalCrawled   int
@@ -33,6 +34,7 @@ func NewCrawlerService(newsRepo *repository.NewsRepository) *CrawlerService {
 		crawler:        crawler.NewCrawler(),
 		qualityService: NewContentQualityService(),
 		aiService:      nil, // Will be set via SetAIService
+		aiHTMLParser:   nil, // Will be set via SetAIHTMLParser
 		isRunning:      false,
 		totalCrawled:   0,
 		filteredCount:  0,
@@ -43,6 +45,15 @@ func NewCrawlerService(newsRepo *repository.NewsRepository) *CrawlerService {
 // SetAIService sets the AI service for auto-analysis
 func (s *CrawlerService) SetAIService(aiService *AIService) {
 	s.aiService = aiService
+}
+
+// SetAIHTMLParser sets the AI HTML parser for fallback parsing
+func (s *CrawlerService) SetAIHTMLParser(parser *AIHTMLParser) {
+	s.aiHTMLParser = parser
+	if parser != nil {
+		s.crawler.SetAIParser(parser)
+		logger.Info("AI HTML parser enabled for crawler fallback")
+	}
 }
 
 func (s *CrawlerService) StartCrawl(ctx context.Context, source string) (string, error) {
@@ -273,18 +284,217 @@ func (s *CrawlerService) getLastCrawlTimeForSource(ctx context.Context, source s
 // StartCrawlMultipleSources crawls multiple sources in parallel
 func (s *CrawlerService) StartCrawlMultipleSources(ctx context.Context, sources []string, options CrawlOptions) ([]string, error) {
 	jobIDs := make([]string, 0, len(sources))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	// Start all crawls in parallel
 	for _, source := range sources {
-		jobID, err := s.StartCrawlWithOptions(ctx, source, options)
-		if err != nil {
-			logger.Error("Failed to start crawl for source %s: %v", source, err)
-			continue
-		}
-		jobIDs = append(jobIDs, jobID)
-		// Small delay between starting crawls
-		time.Sleep(1 * time.Second)
+		wg.Add(1)
+		go func(src string) {
+			defer wg.Done()
+			jobID, err := s.startCrawlJob(ctx, src, options)
+			if err != nil {
+				logger.Error("Failed to start crawl for source %s: %v", src, err)
+				return
+			}
+			mu.Lock()
+			jobIDs = append(jobIDs, jobID)
+			mu.Unlock()
+		}(source)
 	}
 
+	// Wait for all crawls to start (not to complete)
+	wg.Wait()
+
+	logger.Info("Started %d crawl jobs for %d sources", len(jobIDs), len(sources))
 	return jobIDs, nil
+}
+
+// startCrawlJob starts a crawl job without checking isRunning (for parallel crawls)
+func (s *CrawlerService) startCrawlJob(ctx context.Context, source string, options CrawlOptions) (string, error) {
+	jobID := fmt.Sprintf("job-%d-%s-%d", time.Now().Unix(), source, len(source))
+
+	// Create background context that won't be cancelled when request ends
+	bgCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute) // Increased timeout for AI parsing
+
+	// Start crawling in a goroutine
+	go func() {
+		defer cancel()
+
+		logger.Info("Starting crawl job %s for source: %s (options: onlyNew=%v, minAge=%v, forceRefresh=%v)",
+			jobID, source, options.OnlyNew, options.MinAge, options.ForceRefresh)
+
+		// Create crawl job
+		job := &model.CrawlJob{
+			ID:     jobID,
+			Source: source,
+			Status: "running",
+		}
+
+		// Execute crawler with background context
+		results, err := s.crawler.Crawl(bgCtx, source)
+		if err != nil {
+			logger.Error("Crawl job %s failed: %v", jobID, err)
+			job.Status = "failed"
+			job.Error = err.Error()
+			return
+		}
+
+		if len(results) == 0 {
+			logger.Warn("Crawl job %s completed but found 0 results", jobID)
+			job.Status = "completed"
+			job.ItemsFound = 0
+			return
+		}
+
+		// Filter results by quality and process
+		savedCount := 0
+		filteredCount := 0
+		analyzedCount := 0
+		errorCount := 0
+
+		logger.Info("Processing %d crawled results for job %s", len(results), jobID)
+
+		// Get cutoff time for filtering old news
+		var cutoffTime time.Time
+		if options.MinAge > 0 {
+			cutoffTime = time.Now().Add(-options.MinAge)
+		}
+
+		// Process each result
+		for i, news := range results {
+			// Check if we should stop
+			select {
+			case <-s.stopChan:
+				logger.Info("Crawl job %s stopped by user", jobID)
+				return
+			default:
+			}
+
+			// Basic validation
+			if news == nil {
+				logger.Warn("Skipping nil news item at index %d", i)
+				filteredCount++
+				continue
+			}
+
+			if news.Title == "" {
+				logger.Warn("Skipping news item %d: empty title", i)
+				filteredCount++
+				continue
+			}
+
+			// Ensure SourceURL is set (required for unique constraint)
+			if news.SourceURL == "" {
+				logger.Warn("Skipping news item %d: empty source_url (title: %s)", i, news.Title)
+				filteredCount++
+				continue
+			}
+
+			// Filter by age if specified
+			if !cutoffTime.IsZero() && !news.PublishedAt.IsZero() {
+				if news.PublishedAt.Before(cutoffTime) {
+					logger.Debug("Skipping old news: %s (published: %s, cutoff: %s)",
+						news.Title, news.PublishedAt.Format(time.RFC3339), cutoffTime.Format(time.RFC3339))
+					filteredCount++
+					continue
+				}
+			}
+
+			// Generate ID if not set
+			if news.ID == "" {
+				hash := md5.Sum([]byte(news.SourceURL))
+				news.ID = hex.EncodeToString(hash[:])
+			}
+
+			// Set timestamps if not set
+			now := time.Now()
+			if news.CrawledAt.IsZero() {
+				news.CrawledAt = now
+			}
+			if news.PublishedAt.IsZero() {
+				news.PublishedAt = now
+			}
+			if news.CreatedAt.IsZero() {
+				news.CreatedAt = now
+			}
+			if news.UpdatedAt.IsZero() {
+				news.UpdatedAt = now
+			}
+
+			// Ensure Source is set
+			if news.Source == "" {
+				news.Source = source
+			}
+
+			quality := s.qualityService.AssessQuality(news)
+
+			if !quality.ShouldShow {
+				filteredCount++
+				logger.Debug("Filtered low quality news: %s (score: %.2f)", news.Title, quality.Score)
+				continue
+			}
+
+			// Extract trading pairs before saving
+			if s.aiService != nil {
+				news.RelatedPairs = s.aiService.extractTradingPairs(news)
+			}
+
+			// Save high quality news with background context
+			// Create method will handle update if news already exists
+			if err := s.newsRepo.Create(bgCtx, news); err != nil {
+				errorCount++
+				logger.Error("Failed to save news '%s' (ID: %s, URL: %s): %v", news.Title, news.ID, news.SourceURL, err)
+				// Continue with next news instead of stopping
+			} else {
+				savedCount++
+				logger.Info("✅ Successfully saved/updated news: %s (ID: %s, URL: %s)", news.Title, news.ID, news.SourceURL)
+
+				// Auto-analyze sentiment if AI service is available and enabled
+				if s.aiService != nil && s.aiService.cfg != nil && s.aiService.cfg.EnableAutoAnalysis {
+					go func(newsID string) {
+						// Use background context for AI analysis too
+						_, err := s.aiService.AnalyzeSentiment(bgCtx, newsID)
+						if err != nil {
+							logger.Warn("Failed to auto-analyze sentiment for news %s: %v", newsID, err)
+						} else {
+							analyzedCount++
+							logger.Debug("Auto-analyzed sentiment for news: %s", newsID)
+						}
+					}(news.ID)
+				}
+			}
+		}
+
+		job.Status = "completed"
+		job.ItemsFound = len(results)
+		job.CompletedAt = time.Now()
+
+		// Update statistics
+		s.mu.Lock()
+		s.totalCrawled += savedCount
+		s.filteredCount += filteredCount
+		s.mu.Unlock()
+
+		// Log detailed summary
+		logger.Info("═══════════════════════════════════════════════════════════")
+		logger.Info("Crawl job %s COMPLETED for source: %s", jobID, source)
+		logger.Info("  📊 Found:        %d items", len(results))
+		logger.Info("  ✅ Saved/Updated: %d items", savedCount)
+		logger.Info("  🚫 Filtered:     %d items (low quality)", filteredCount)
+		logger.Info("  ❌ Errors:       %d items", errorCount)
+		logger.Info("  🤖 Analyzed:     %d items", analyzedCount)
+		logger.Info("═══════════════════════════════════════════════════════════")
+
+		// Force invalidate all caches to ensure fresh data
+		if savedCount > 0 {
+			// Invalidate all list caches
+			s.newsRepo.InvalidateListCache(bgCtx)
+			logger.Info("Cache invalidated - %d news items saved/updated", savedCount)
+		}
+	}()
+
+	return jobID, nil
 }
 
 func (s *CrawlerService) StopCrawl(ctx context.Context) error {

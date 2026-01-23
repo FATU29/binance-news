@@ -151,6 +151,11 @@ func (h *NewsHandler) GetNewsWithFilter(c *gin.Context) {
 		}
 	}
 
+	// Parse parsing method filter
+	if parsingMethod := c.Query("parsing_method"); parsingMethod != "" {
+		filter.ParsingMethod = parsingMethod
+	}
+
 	// Get filtered news with pagination
 	news, total, err := h.newsService.GetNewsWithFilterPaginated(c.Request.Context(), filter, pageNum, limitNum)
 	if err != nil {
@@ -240,6 +245,11 @@ func (h *NewsHandler) GetNewsAdvanced(c *gin.Context) {
 		if _, err := fmt.Sscanf(aiAnalyzedStr, "%t", &analyzed); err == nil {
 			filter.AIAnalyzed = &analyzed
 		}
+	}
+
+	// Parse parsing method filter
+	if parsingMethod := c.Query("parsing_method"); parsingMethod != "" {
+		filter.ParsingMethod = parsingMethod
 	}
 
 	// Parse language

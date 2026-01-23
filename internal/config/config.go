@@ -10,12 +10,12 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig
-	Crawler  CrawlerConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
+	Server    ServerConfig
+	Crawler   CrawlerConfig
+	Database  DatabaseConfig
+	Redis     RedisConfig
 	AIService AIServiceConfig
-	CronJob  CronJobConfig
+	CronJob   CronJobConfig
 }
 
 type ServerConfig struct {
@@ -54,10 +54,11 @@ type RedisConfig struct {
 }
 
 type AIServiceConfig struct {
-	BaseURL     string
-	Timeout     time.Duration
+	BaseURL            string
+	Timeout            time.Duration
 	EnableAutoAnalysis bool
-	BatchSize   int
+	BatchSize          int
+	ForceAIParsing     bool // Force AI-only parsing (skip rule-based)
 }
 
 type CronJobConfig struct {
@@ -101,10 +102,11 @@ func Load() (*Config, error) {
 			CacheTTL: time.Duration(getEnvAsInt("CACHE_TTL", 3600)) * time.Second,
 		},
 		AIService: AIServiceConfig{
-			BaseURL:          getEnv("AI_SERVICE_URL", "http://localhost:8000"),
-			Timeout:          time.Duration(getEnvAsInt("AI_SERVICE_TIMEOUT", 30)) * time.Second,
+			BaseURL:            getEnv("AI_SERVICE_URL", "http://localhost:8000"),
+			Timeout:            time.Duration(getEnvAsInt("AI_SERVICE_TIMEOUT", 120)) * time.Second, // Increased to 120s for AI parsing
 			EnableAutoAnalysis: getEnv("AI_AUTO_ANALYZE", "true") == "true",
-			BatchSize:        getEnvAsInt("AI_BATCH_SIZE", 10),
+			BatchSize:          getEnvAsInt("AI_BATCH_SIZE", 10),
+			ForceAIParsing:     getEnv("AI_FORCE_PARSING", "false") == "true",
 		},
 		CronJob: CronJobConfig{
 			Enabled:  getEnv("CRONJOB_ENABLED", "true") == "true",
@@ -116,23 +118,23 @@ func Load() (*Config, error) {
 }
 
 func getEnv(key, defaultValue string) string {
-if value := os.Getenv(key); value != "" {
-return value
-}
-return defaultValue
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }
 
 func getEnvAsInt(key string, defaultValue int) int {
-valueStr := os.Getenv(key)
-if valueStr == "" {
-return defaultValue
-}
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
 
-value, err := strconv.Atoi(valueStr)
-if err != nil {
-fmt.Printf("Warning: Invalid value for %s, using default %d\n", key, defaultValue)
-return defaultValue
-}
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		fmt.Printf("Warning: Invalid value for %s, using default %d\n", key, defaultValue)
+		return defaultValue
+	}
 
-return value
+	return value
 }

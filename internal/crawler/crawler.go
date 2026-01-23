@@ -21,13 +21,27 @@ import (
 
 // Crawler handles web scraping operations
 type Crawler struct {
-	sources []model.CrawlSource
+	sources  []model.CrawlSource
+	aiParser AIParserInterface // Optional AI parser for fallback
+}
+
+// AIParserInterface defines interface for AI HTML parser
+type AIParserInterface interface {
+	ParseHTMLToNews(ctx context.Context, htmlContent string, url string, sourceName string) (*model.News, error)
+	IsEnabled() bool
+	IsForceAIParsing() bool
 }
 
 func NewCrawler() *Crawler {
 	return &Crawler{
-		sources: getDefaultSources(),
+		sources:  getDefaultSources(),
+		aiParser: nil,
 	}
+}
+
+// SetAIParser sets the AI parser for fallback parsing
+func (c *Crawler) SetAIParser(parser AIParserInterface) {
+	c.aiParser = parser
 }
 
 // Crawl executes the crawling operation for a specific source
@@ -76,6 +90,18 @@ func (c *Crawler) Crawl(ctx context.Context, sourceName string) ([]*model.News, 
 		results, err = c.crawlUToday(ctx, source)
 	case "cryptoslate":
 		results, err = c.crawlCryptoSlate(ctx, source)
+	case "beincrypto":
+		results, err = c.crawlRSSFeed(ctx, source, "https://beincrypto.com/feed/", "bi")
+	case "ambcrypto":
+		results, err = c.crawlRSSFeed(ctx, source, "https://ambcrypto.com/feed/", "am")
+	case "newsbtc":
+		results, err = c.crawlRSSFeed(ctx, source, "https://www.newsbtc.com/feed/", "nb")
+	case "bitcoinmagazine":
+		results, err = c.crawlRSSFeed(ctx, source, "https://bitcoinmagazine.com/.rss/full/", "bm")
+	case "cryptopotato":
+		results, err = c.crawlRSSFeed(ctx, source, "https://cryptopotato.com/feed/", "cp")
+	case "99bitcoins":
+		results, err = c.crawlRSSFeed(ctx, source, "https://99bitcoins.com/feed/", "99")
 	default:
 		return nil, fmt.Errorf("no crawler implementation for source: %s", sourceName)
 	}
@@ -203,6 +229,12 @@ func (c *Crawler) crawlCoinTelegraph(ctx context.Context, source *model.CrawlSou
 	listCollector.Wait()
 	detailCollector.Wait()
 
+	// After getting article list, crawl detail pages with AI parser
+	if c.aiParser != nil && c.aiParser.IsEnabled() && len(results) > 0 {
+		logger.Info("Starting AI-based detail page crawl for %d articles", len(results))
+		c.crawlDetailPagesWithAI(ctx, results, source.Name, 5) // Max 5 concurrent requests
+	}
+
 	logger.Info("CoinTelegraph: Crawled %d articles", len(results))
 	return results, nil
 }
@@ -267,6 +299,13 @@ func (c *Crawler) crawlCoinDesk(ctx context.Context, source *model.CrawlSource) 
 	}
 
 	logger.Info("CoinDesk RSS: Found %d items", len(results))
+
+	// After getting article list, crawl detail pages with AI parser
+	if c.aiParser != nil && c.aiParser.IsEnabled() && len(results) > 0 {
+		logger.Info("Starting AI-based detail page crawl for %d articles", len(results))
+		c.crawlDetailPagesWithAI(ctx, results, source.Name, 5) // Max 5 concurrent requests
+	}
+
 	return results, nil
 }
 
@@ -330,6 +369,13 @@ func (c *Crawler) crawlCryptoNews(ctx context.Context, source *model.CrawlSource
 	}
 
 	logger.Info("CryptoNews RSS: Found %d items", len(results))
+
+	// After getting article list, crawl detail pages with AI parser
+	if c.aiParser != nil && c.aiParser.IsEnabled() && len(results) > 0 {
+		logger.Info("Starting AI-based detail page crawl for %d articles", len(results))
+		c.crawlDetailPagesWithAI(ctx, results, source.Name, 5)
+	}
+
 	return results, nil
 }
 
@@ -425,6 +471,13 @@ func (c *Crawler) crawlBinance(ctx context.Context, source *model.CrawlSource) (
 	}
 
 	logger.Info("Binance RSS: Found %d items", len(results))
+
+	// After getting article list, crawl detail pages with AI parser
+	if c.aiParser != nil && c.aiParser.IsEnabled() && len(results) > 0 {
+		logger.Info("Starting AI-based detail page crawl for %d articles", len(results))
+		c.crawlDetailPagesWithAI(ctx, results, source.Name, 5)
+	}
+
 	return results, nil
 }
 
@@ -479,6 +532,13 @@ func (c *Crawler) crawlCoinMarketCap(ctx context.Context, source *model.CrawlSou
 	}
 
 	logger.Info("CoinMarketCap RSS: Found %d items", len(results))
+
+	// After getting article list, crawl detail pages with AI parser
+	if c.aiParser != nil && c.aiParser.IsEnabled() && len(results) > 0 {
+		logger.Info("Starting AI-based detail page crawl for %d articles", len(results))
+		c.crawlDetailPagesWithAI(ctx, results, source.Name, 5)
+	}
+
 	return results, nil
 }
 
@@ -537,6 +597,13 @@ func (c *Crawler) crawlBitcoinCom(ctx context.Context, source *model.CrawlSource
 	}
 
 	logger.Info("Bitcoin.com RSS: Found %d items", len(results))
+
+	// After getting article list, crawl detail pages with AI parser
+	if c.aiParser != nil && c.aiParser.IsEnabled() && len(results) > 0 {
+		logger.Info("Starting AI-based detail page crawl for %d articles", len(results))
+		c.crawlDetailPagesWithAI(ctx, results, source.Name, 5)
+	}
+
 	return results, nil
 }
 
@@ -595,6 +662,13 @@ func (c *Crawler) crawlTheBlock(ctx context.Context, source *model.CrawlSource) 
 	}
 
 	logger.Info("The Block RSS: Found %d items", len(results))
+
+	// After getting article list, crawl detail pages with AI parser
+	if c.aiParser != nil && c.aiParser.IsEnabled() && len(results) > 0 {
+		logger.Info("Starting AI-based detail page crawl for %d articles", len(results))
+		c.crawlDetailPagesWithAI(ctx, results, source.Name, 5)
+	}
+
 	return results, nil
 }
 
@@ -653,6 +727,13 @@ func (c *Crawler) crawlDecrypt(ctx context.Context, source *model.CrawlSource) (
 	}
 
 	logger.Info("Decrypt RSS: Found %d items", len(results))
+
+	// After getting article list, crawl detail pages with AI parser
+	if c.aiParser != nil && c.aiParser.IsEnabled() && len(results) > 0 {
+		logger.Info("Starting AI-based detail page crawl for %d articles", len(results))
+		c.crawlDetailPagesWithAI(ctx, results, source.Name, 5)
+	}
+
 	return results, nil
 }
 
@@ -713,6 +794,13 @@ func (c *Crawler) crawlUToday(ctx context.Context, source *model.CrawlSource) ([
 	}
 
 	logger.Info("U.Today RSS: Found %d items", len(results))
+
+	// After getting article list, crawl detail pages with AI parser
+	if c.aiParser != nil && c.aiParser.IsEnabled() && len(results) > 0 {
+		logger.Info("Starting AI-based detail page crawl for %d articles", len(results))
+		c.crawlDetailPagesWithAI(ctx, results, source.Name, 5)
+	}
+
 	return results, nil
 }
 
@@ -773,6 +861,80 @@ func (c *Crawler) crawlCryptoSlate(ctx context.Context, source *model.CrawlSourc
 	}
 
 	logger.Info("CryptoSlate RSS: Found %d items", len(results))
+
+	// After getting article list, crawl detail pages with AI parser
+	if c.aiParser != nil && c.aiParser.IsEnabled() && len(results) > 0 {
+		logger.Info("Starting AI-based detail page crawl for %d articles", len(results))
+		c.crawlDetailPagesWithAI(ctx, results, source.Name, 5)
+	}
+
+	return results, nil
+}
+
+// crawlRSSFeed is a generic function to crawl any RSS feed
+func (c *Crawler) crawlRSSFeed(ctx context.Context, source *model.CrawlSource, rssURL string, idPrefix string) ([]*model.News, error) {
+	var results []*model.News
+
+	fp := gofeed.NewParser()
+	feed, err := fp.ParseURL(rssURL)
+	if err != nil {
+		logger.Error("%s RSS feed error: %v", source.Name, err)
+		return nil, fmt.Errorf("failed to parse %s RSS: %w", source.Name, err)
+	}
+
+	for _, item := range feed.Items {
+		if item == nil || item.Title == "" || item.Link == "" {
+			continue
+		}
+
+		hash := md5.Sum([]byte(item.Link))
+		id := fmt.Sprintf("%s-%s", idPrefix, hex.EncodeToString(hash[:])[:16])
+
+		publishedAt := time.Now()
+		if item.PublishedParsed != nil {
+			publishedAt = *item.PublishedParsed
+		}
+
+		imageURL := ""
+		if item.Image != nil && item.Image.URL != "" {
+			imageURL = item.Image.URL
+		} else if len(item.Enclosures) > 0 && strings.HasPrefix(item.Enclosures[0].Type, "image") {
+			imageURL = item.Enclosures[0].URL
+		}
+
+		news := &model.News{
+			ID:          id,
+			Title:       strings.TrimSpace(item.Title),
+			Summary:     strings.TrimSpace(item.Description),
+			Content:     strings.TrimSpace(item.Content),
+			Source:      source.Name,
+			SourceURL:   item.Link,
+			ImageURL:    imageURL,
+			Category:    "crypto",
+			Language:    "en",
+			PublishedAt: publishedAt,
+			CrawledAt:   time.Now(),
+		}
+
+		if len(item.Authors) > 0 {
+			news.Author = item.Authors[0].Name
+		}
+
+		if len(item.Categories) > 0 {
+			news.Tags = item.Categories
+		}
+
+		results = append(results, news)
+	}
+
+	logger.Info("%s RSS: Found %d items", source.Name, len(results))
+
+	// After getting article list, crawl detail pages with AI parser
+	if c.aiParser != nil && c.aiParser.IsEnabled() && len(results) > 0 {
+		logger.Info("Starting AI-based detail page crawl for %d articles from %s", len(results), source.Name)
+		c.crawlDetailPagesWithAI(ctx, results, source.Name, 5)
+	}
+
 	return results, nil
 }
 
@@ -881,6 +1043,54 @@ func getDefaultSources() []model.CrawlSource {
 				// RSS feed based
 			},
 		},
+		{
+			Name:      "beincrypto",
+			BaseURL:   "https://beincrypto.com",
+			Enabled:   true,
+			Selectors: model.Selector{
+				// RSS feed based
+			},
+		},
+		{
+			Name:      "ambcrypto",
+			BaseURL:   "https://ambcrypto.com",
+			Enabled:   true,
+			Selectors: model.Selector{
+				// RSS feed based
+			},
+		},
+		{
+			Name:      "newsbtc",
+			BaseURL:   "https://www.newsbtc.com",
+			Enabled:   true,
+			Selectors: model.Selector{
+				// RSS feed based
+			},
+		},
+		{
+			Name:      "bitcoinmagazine",
+			BaseURL:   "https://bitcoinmagazine.com",
+			Enabled:   true,
+			Selectors: model.Selector{
+				// RSS feed based
+			},
+		},
+		{
+			Name:      "cryptopotato",
+			BaseURL:   "https://cryptopotato.com",
+			Enabled:   true,
+			Selectors: model.Selector{
+				// RSS feed based
+			},
+		},
+		{
+			Name:      "99bitcoins",
+			BaseURL:   "https://99bitcoins.com",
+			Enabled:   true,
+			Selectors: model.Selector{
+				// RSS feed based
+			},
+		},
 	}
 }
 
@@ -918,6 +1128,18 @@ func (c *Crawler) CrawlDetailPage(ctx context.Context, url string) (*model.News,
 		sourceName = "utoday"
 	case strings.Contains(url, "cryptoslate.com"):
 		sourceName = "cryptoslate"
+	case strings.Contains(url, "beincrypto.com"):
+		sourceName = "beincrypto"
+	case strings.Contains(url, "ambcrypto.com"):
+		sourceName = "ambcrypto"
+	case strings.Contains(url, "newsbtc.com"):
+		sourceName = "newsbtc"
+	case strings.Contains(url, "bitcoinmagazine.com"):
+		sourceName = "bitcoinmagazine"
+	case strings.Contains(url, "cryptopotato.com"):
+		sourceName = "cryptopotato"
+	case strings.Contains(url, "99bitcoins.com"):
+		sourceName = "99bitcoins"
 	default:
 		// Try to extract domain name as fallback
 		if strings.Contains(url, "://") {
@@ -942,11 +1164,57 @@ func (c *Crawler) CrawlDetailPage(ctx context.Context, url string) (*model.News,
 		mu.Lock()
 		defer mu.Unlock()
 
+		// Check if AI-only parsing is forced
+		forceAI := c.aiParser != nil && c.aiParser.IsEnabled() && c.aiParser.IsForceAIParsing()
+
+		if forceAI {
+			// Force AI parsing - skip rule-based entirely
+			logger.Info("AI-only mode: Using AI parser for: %s", url)
+
+			// Get raw HTML
+			htmlContent := string(e.Response.Body)
+
+			// Try AI parsing
+			aiNews, err := c.aiParser.ParseHTMLToNews(ctx, htmlContent, url, sourceName)
+			if err == nil && aiNews != nil {
+				news = aiNews
+				logger.Info("AI parser successfully extracted article: %s (%d chars, method: %s, confidence: %.2f)",
+					aiNews.Title, len(aiNews.Content), aiNews.ParsingMethod, aiNews.ParsingConfidence)
+				return
+			} else {
+				logger.Error("AI parser failed in AI-only mode: %v", err)
+				// In AI-only mode, we don't fallback to rule-based
+				return
+			}
+		}
+
+		// Normal mode: Try rule-based first, then AI as fallback
 		// Extract title with multiple fallback strategies
 		title := extractTitle(e)
 
 		// Extract content with intelligent paragraph extraction
 		content := extractContent(e, sourceName)
+
+		// If rule-based extraction failed or got poor results (content < 500 chars for analysis), try AI parser
+		// This ensures we have enough content for causal analysis (requires 500+ chars)
+		if (title == "" || title == "Untitled Article" || len(content) < 500) && c.aiParser != nil && c.aiParser.IsEnabled() {
+			logger.Info("Rule-based extraction insufficient (content: %d chars, need 500+ for analysis), trying AI parser for: %s", len(content), url)
+
+			// Get raw HTML
+			htmlContent := string(e.Response.Body)
+
+			// Try AI parsing
+			aiNews, err := c.aiParser.ParseHTMLToNews(ctx, htmlContent, url, sourceName)
+			if err == nil && aiNews != nil {
+				// AI parsing sets ParsingMethod and ParsingConfidence in ParseHTMLToNews
+				news = aiNews
+				logger.Info("AI parser successfully extracted article: %s (%d chars, method: %s, confidence: %.2f)",
+					aiNews.Title, len(aiNews.Content), aiNews.ParsingMethod, aiNews.ParsingConfidence)
+				return
+			} else {
+				logger.Warn("AI parser also failed: %v, falling back to rule-based", err)
+			}
+		}
 
 		// Extract author
 		author := extractAuthor(e)
@@ -962,25 +1230,31 @@ func (c *Crawler) CrawlDetailPage(ctx context.Context, url string) (*model.News,
 
 		// Generate ID
 		hash := md5.Sum([]byte(url))
-		id := fmt.Sprintf("%s-%s", sourceName[:2], hex.EncodeToString(hash[:])[:16])
+		sourcePrefix := sourceName
+		if len(sourceName) > 2 {
+			sourcePrefix = sourceName[:2]
+		}
+		id := fmt.Sprintf("%s-%s", sourcePrefix, hex.EncodeToString(hash[:])[:16])
 
 		// Create summary from content
 		summary := createSummary(content, 300)
 
 		news = &model.News{
-			ID:          id,
-			Title:       strings.TrimSpace(title),
-			Content:     strings.TrimSpace(content),
-			Summary:     summary,
-			Author:      strings.TrimSpace(author),
-			Source:      sourceName,
-			SourceURL:   url,
-			ImageURL:    imageURL,
-			Category:    "crypto",
-			Tags:        tags,
-			Language:    "en",
-			PublishedAt: publishedAt,
-			CrawledAt:   time.Now(),
+			ID:                id,
+			Title:             strings.TrimSpace(title),
+			Content:           strings.TrimSpace(content),
+			Summary:           summary,
+			Author:            strings.TrimSpace(author),
+			Source:            sourceName,
+			SourceURL:         url,
+			ImageURL:          imageURL,
+			Category:          "crypto",
+			Tags:              tags,
+			Language:          "en",
+			PublishedAt:       publishedAt,
+			CrawledAt:         time.Now(),
+			ParsingMethod:     "rule-based",
+			ParsingConfidence: 0.8, // Default confidence for rule-based
 		}
 
 		logger.Info("Extracted article: %s (%d chars, author: %s)", title, len(content), author)

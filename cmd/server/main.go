@@ -56,11 +56,15 @@ func main() {
 	crawlerService := service.NewCrawlerService(newsRepo)
 	newsService := service.NewNewsService(newsRepo)
 	aiService := service.NewAIService(newsRepo, &cfg.AIService)
+	aiHTMLParser := service.NewAIHTMLParser(&cfg.AIService)
 	analyticsService := service.NewAnalyticsService(newsRepo)
 	cronJobService := service.NewCronJobService(crawlerService, newsRepo)
 
 	// Connect AI service to crawler for auto-analysis
 	crawlerService.SetAIService(aiService)
+
+	// Connect AI HTML parser to crawler for fallback parsing
+	crawlerService.SetAIHTMLParser(aiHTMLParser)
 
 	// Initialize handlers
 	newsHandler := handler.NewNewsHandler(newsService, crawlerService)

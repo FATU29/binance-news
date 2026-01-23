@@ -243,12 +243,58 @@ func (r *NewsRepository) Create(ctx context.Context, news *model.News) error {
 	var existing model.News
 	err := r.db.Where("source_url = ?", news.SourceURL).First(&existing).Error
 	if err == nil {
-		// News already exists, update it instead
-		logger.Debug("News already exists with source_url: %s (ID: %s), updating instead", news.SourceURL, existing.ID)
-		news.ID = existing.ID
-		news.CreatedAt = existing.CreatedAt // Preserve original creation time
-		news.UpdatedAt = time.Now()         // Update timestamp
-		return r.Update(ctx, news)
+		// News already exists, merge and update it instead
+		logger.Debug("News already exists with source_url: %s (ID: %s), merging and updating", news.SourceURL, existing.ID)
+		
+		// Merge content: prefer longer/more complete content
+		if news.Content != "" {
+			existingContentLen := len(existing.Content)
+			newContentLen := len(news.Content)
+			
+			// Use new content if:
+			// 1. New content is substantial (500+ chars) - likely full article
+			// 2. New content is longer than existing
+			// 3. Existing content is empty or very short
+			if newContentLen >= 500 || newContentLen > existingContentLen || existingContentLen < 200 {
+				existing.Content = news.Content
+				logger.Debug("Merged content: updated to %d chars (was %d chars)", newContentLen, existingContentLen)
+			}
+		}
+		
+		// Merge other fields (prefer new if better)
+		if news.Title != "" {
+			existing.Title = news.Title
+		}
+		if news.Summary != "" && (existing.Summary == "" || len(news.Summary) > len(existing.Summary)) {
+			existing.Summary = news.Summary
+		}
+		if news.Author != "" {
+			existing.Author = news.Author
+		}
+		if news.ImageURL != "" && existing.ImageURL == "" {
+			existing.ImageURL = news.ImageURL
+		}
+		if len(news.Tags) > 0 {
+			existing.Tags = news.Tags
+		}
+		if news.Language != "" {
+			existing.Language = news.Language
+		}
+		if !news.PublishedAt.IsZero() {
+			existing.PublishedAt = news.PublishedAt
+		}
+		// Update parsing metadata
+		if news.ParsingMethod != "" {
+			existing.ParsingMethod = news.ParsingMethod
+		}
+		if news.ParsingConfidence > 0 {
+			existing.ParsingConfidence = news.ParsingConfidence
+		}
+		
+		existing.UpdatedAt = time.Now()
+		existing.CrawledAt = time.Now()
+		
+		return r.Update(ctx, &existing)
 	}
 	if err != gorm.ErrRecordNotFound {
 		logger.Error("Error checking for existing news: %v", err)
@@ -354,6 +400,11 @@ func (r *NewsRepository) FindWithFilter(ctx context.Context, filter *model.NewsF
 	// Apply language filter
 	if filter.Language != "" {
 		query = query.Where("language = ?", filter.Language)
+	}
+
+	// Apply parsing method filter
+	if filter.ParsingMethod != "" {
+		query = query.Where("parsing_method = ?", filter.ParsingMethod)
 	}
 
 	// Apply trading pairs filter (JSONB array contains check)

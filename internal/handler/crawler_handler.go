@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -21,11 +22,11 @@ func NewCrawlerHandler(crawlerService *service.CrawlerService) *CrawlerHandler {
 }
 
 type StartCrawlerRequest struct {
-	Source       string `json:"source" binding:"required"`
-	OnlyNew      bool   `json:"only_new,omitempty"`      // Only crawl news newer than last crawl
-	MinAgeHours  int    `json:"min_age_hours,omitempty"` // Only crawl news from last N hours
-	ForceRefresh bool   `json:"force_refresh,omitempty"` // Force crawl even if news exists
-	Sources      []string `json:"sources,omitempty"`     // Multiple sources to crawl
+	Source       string   `json:"source,omitempty"`        // Single source to crawl
+	OnlyNew      bool     `json:"only_new,omitempty"`      // Only crawl news newer than last crawl
+	MinAgeHours  int      `json:"min_age_hours,omitempty"` // Only crawl news from last N hours
+	ForceRefresh bool     `json:"force_refresh,omitempty"` // Force crawl even if news exists
+	Sources      []string `json:"sources,omitempty"`       // Multiple sources to crawl
 }
 
 // StartCrawler godoc
@@ -41,6 +42,13 @@ func (h *CrawlerHandler) StartCrawler(c *gin.Context) {
 	var req StartCrawlerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httputil.ErrorResponse(c, http.StatusBadRequest, "Invalid request", err)
+		return
+	}
+
+	// Validate: must have either Source or Sources
+	if len(req.Sources) == 0 && req.Source == "" {
+		httputil.ErrorResponse(c, http.StatusBadRequest, "Invalid request",
+			fmt.Errorf("either 'source' or 'sources' must be provided"))
 		return
 	}
 
