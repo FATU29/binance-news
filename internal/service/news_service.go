@@ -72,3 +72,8 @@ func (s *NewsService) GetUnanalyzedNews(ctx context.Context, limit int) ([]model
 func (s *NewsService) GetNewsWithFilterPaginated(ctx context.Context, filter *model.NewsFilter, page, limit int) ([]model.News, int, error) {
 	return s.newsRepo.FindWithFilterPaginated(ctx, filter, page, limit)
 }
+
+// GetLatestNewsBySymbol retrieves the most recent news for a specific trading symbol
+func (s *NewsService) GetLatestNewsBySymbol(ctx context.Context, symbol string, limit int) ([]model.News, error) {
+	return s.newsRepo.FindLatestBySymbol(ctx, symbol, limit)
+}

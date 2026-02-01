@@ -550,3 +550,18 @@ func (r *NewsRepository) FindWithFilterPaginated(ctx context.Context, filter *mo
 
 	return results, int(total), nil
 }
+
+// FindLatestBySymbol finds the most recent news for a specific trading symbol
+func (r *NewsRepository) FindLatestBySymbol(ctx context.Context, symbol string, limit int) ([]model.News, error) {
+	var results []model.News
+
+	// JSONB array contains check, ordered by most recent first
+	if err := r.db.Where("related_pairs @> ?", fmt.Sprintf(`["%s"]`, symbol)).
+		Order("published_at DESC").
+		Limit(limit).
+		Find(&results).Error; err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}

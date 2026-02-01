@@ -287,6 +287,46 @@ func (h *NewsHandler) GetNewsByTradingPair(c *gin.Context) {
 	httputil.SuccessResponse(c, news)
 }
 
+// GetLatestNewsBySymbol godoc
+// @Summary Get latest 10 news by trading symbol
+// @Description Get the 10 most recent news articles for a specific trading pair/symbol (e.g., BTCUSDT)
+// @Tags news
+// @Accept json
+// @Produce json
+// @Param symbol path string true "Trading symbol (e.g., BTCUSDT, ETHUSDT)"
+// @Param limit query int false "Number of articles to return (default: 10, max: 50)"
+// @Success 200 {object} httputil.Response
+// @Router /api/v1/news/latest/{symbol} [get]
+func (h *NewsHandler) GetLatestNewsBySymbol(c *gin.Context) {
+	symbol := c.Param("symbol")
+	
+	// Parse limit with default 10
+	limit := 10
+	if limitStr := c.Query("limit"); limitStr != "" {
+		fmt.Sscanf(limitStr, "%d", &limit)
+		// Cap at 50
+		if limit > 50 {
+			limit = 50
+		}
+		if limit < 1 {
+			limit = 10
+		}
+	}
+
+	news, err := h.newsService.GetLatestNewsBySymbol(c.Request.Context(), symbol, limit)
+	if err != nil {
+		httputil.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch latest news", err)
+		return
+	}
+
+	httputil.SuccessResponse(c, gin.H{
+		"symbol": symbol,
+		"count":  len(news),
+		"limit":  limit,
+		"items":  news,
+	})
+}
+
 // GetNewsSummaries godoc
 // @Summary Get news summaries
 // @Description Get simplified news data for listing views

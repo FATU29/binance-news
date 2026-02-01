@@ -13,6 +13,8 @@ import (
 	"crawl-news/internal/config"
 	"crawl-news/internal/db"
 	"crawl-news/internal/handler"
+
+	// "crawl-news/internal/middleware" // Disabled - CORS handled by Gateway
 	"crawl-news/internal/repository"
 	"crawl-news/internal/service"
 	"crawl-news/pkg/logger"
@@ -128,7 +130,7 @@ func setupRouter(newsHandler *handler.NewsHandler, crawlerHandler *handler.Crawl
 	// Global middleware
 	router.Use(gin.Recovery())
 	router.Use(logger.GinLogger())
-	// CORS is handled by the gateway, so we don't need it here
+	// CORS is handled by Gateway - disable here to avoid duplicate headers
 	// router.Use(middleware.CORS())
 
 	// Health check endpoints
@@ -145,6 +147,7 @@ func setupRouter(newsHandler *handler.NewsHandler, crawlerHandler *handler.Crawl
 			news.GET("/filter", newsHandler.GetNewsWithFilter) // New endpoint for filtered + paginated
 			news.GET("/advanced", newsHandler.GetNewsAdvanced)
 			news.GET("/pair/:pair", newsHandler.GetNewsByTradingPair)
+			news.GET("/latest/:symbol", newsHandler.GetLatestNewsBySymbol) // Get 10 latest news by symbol
 			news.GET("/summaries", newsHandler.GetNewsSummaries)
 			news.GET("/:id", newsHandler.GetNewsByID)
 			news.POST("/:id/fetch-detail", newsHandler.FetchNewsDetail)
