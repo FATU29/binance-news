@@ -12,6 +12,7 @@ IMPLEMENTATION_COMPLETE.md
 # Build artifacts
 bin/
 tmp/
+server
 *.log
 logs/
 

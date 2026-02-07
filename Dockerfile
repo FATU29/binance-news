@@ -3,39 +3,39 @@
 # Stage 1: Build stage
 FROM golang:1.24-alpine AS builder
 
-# Install build dependencies (with retry & fallback mirror)
-RUN for i in 1 2 3; do \
-      apk update && apk add --no-cache git gcc musl-dev && break; \
-      echo "Retry $i: apk failed, retrying..."; \
-      sleep 3; \
-    done
-
 # Set working directory
 WORKDIR /app
 
-# Copy go mod files
+# Copy go mod files first for better caching
 COPY go.mod go.sum ./
 
-# Download dependencies
-RUN go mod download
+# Download dependencies (will be cached if go.mod/go.sum unchanged)
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download && go mod verify
 
 # Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+# Build the application with build cache
+# - CGO_ENABLED=0: static binary, no gcc/musl needed
+# - Removed -a flag: allows Go build cache to work (HUGE speedup on rebuilds)
+# - -trimpath: reproducible builds
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
     -ldflags="-w -s" \
     -o /app/bin/crawler \
     ./cmd/server
 
 # Stage 2: Runtime stage
-FROM alpine:latest
+FROM alpine:3.21
 
-# Install CA certificates for HTTPS requests (with retry)
+# Install CA certs + wget for healthcheck (with retry logic)
 RUN for i in 1 2 3; do \
-      apk update && apk add --no-cache ca-certificates tzdata && break; \
-      echo "Retry $i: apk failed, retrying..."; \
-      sleep 3; \
+      apk update && apk add --no-cache ca-certificates tzdata wget && break; \
+      echo "Retry $i failed, waiting..."; \
+      sleep 5; \
     done
 
 # Create non-root user
