@@ -3,8 +3,12 @@
 # Stage 1: Build stage
 FROM golang:1.24-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache git gcc musl-dev
+# Install build dependencies (with retry & fallback mirror)
+RUN for i in 1 2 3; do \
+      apk update && apk add --no-cache git gcc musl-dev && break; \
+      echo "Retry $i: apk failed, retrying..."; \
+      sleep 3; \
+    done
 
 # Set working directory
 WORKDIR /app
@@ -27,8 +31,12 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Stage 2: Runtime stage
 FROM alpine:latest
 
-# Install CA certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates tzdata
+# Install CA certificates for HTTPS requests (with retry)
+RUN for i in 1 2 3; do \
+      apk update && apk add --no-cache ca-certificates tzdata && break; \
+      echo "Retry $i: apk failed, retrying..."; \
+      sleep 3; \
+    done
 
 # Create non-root user
 RUN addgroup -g 1000 appuser && \

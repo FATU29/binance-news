@@ -22,13 +22,16 @@ type CronJobService struct {
 	nextRunTime    *time.Time
 }
 
-func NewCronJobService(crawlerService *CrawlerService, newsRepo *repository.NewsRepository) *CronJobService {
+func NewCronJobService(crawlerService *CrawlerService, newsRepo *repository.NewsRepository, interval string) *CronJobService {
+	if interval == "" {
+		interval = "0 0 0 */1 * *" // Default: every day at midnight
+	}
 	return &CronJobService{
 		crawlerService: crawlerService,
 		newsRepo:       newsRepo,
 		cron:           cron.New(cron.WithSeconds()),
 		enabled:        false,
-		interval:       "0 */1 * * * *", // Default: every hour
+		interval:       interval,
 	}
 }
 

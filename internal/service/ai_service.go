@@ -209,8 +209,12 @@ func (s *AIService) FullAnalysis(ctx context.Context, newsID string, tradingPair
 
 	logger.Info("Performing full AI analysis for news: %s", newsID)
 
-	// Analyze sentiment
-	sentiment := s.mockSentimentAnalysis(news)
+	// Analyze sentiment using real AI service, fallback to mock
+	sentiment, err := s.callAISentimentAPI(ctx, news)
+	if err != nil {
+		logger.Warn("AI service call failed in FullAnalysis, using fallback: %v", err)
+		sentiment = s.mockSentimentAnalysis(news)
+	}
 	news.Sentiment = sentiment
 
 	// Analyze price impact
@@ -248,6 +252,48 @@ func (s *AIService) BatchAnalyze(ctx context.Context, newsIDs []string) (map[str
 	}
 
 	return results, nil
+}
+
+// ReanalyzeAll re-runs sentiment analysis on all articles that used keyword fallback
+func (s *AIService) ReanalyzeAll(ctx context.Context) (int, int, error) {
+	// Use a background context with generous timeout since this is a long-running batch job
+	bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	// Get all analyzed news
+	aiAnalyzed := true
+	filter := &model.NewsFilter{
+		AIAnalyzed: &aiAnalyzed,
+	}
+	allNews, err := s.newsRepo.FindWithFilter(bgCtx, filter)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to fetch news: %w", err)
+	}
+
+	total := 0
+	success := 0
+	for _, news := range allNews {
+		// Re-analyze articles that used keyword fallback or have no reasoning
+		if news.Sentiment != nil && strings.Contains(news.Sentiment.Reasoning, "keyword analysis") {
+			total++
+			sentiment, err := s.callAISentimentAPI(bgCtx, &news)
+			if err != nil {
+				logger.Error("Failed to re-analyze news %s: %v", news.ID, err)
+				continue
+			}
+			news.Sentiment = sentiment
+			now := time.Now()
+			news.AnalyzedAt = &now
+			if err := s.newsRepo.Update(bgCtx, &news); err != nil {
+				logger.Error("Failed to update news %s: %v", news.ID, err)
+				continue
+			}
+			success++
+			logger.Info("Re-analyzed news %s: %s -> %s (score: %.2f)", news.ID, "keyword", sentiment.Label, sentiment.Score)
+		}
+	}
+
+	return total, success, nil
 }
 
 // GetAnalyzedNews retrieves news with AI analysis

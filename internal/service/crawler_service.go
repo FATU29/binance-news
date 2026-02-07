@@ -20,6 +20,7 @@ type CrawlerService struct {
 	qualityService *ContentQualityService
 	aiService      *AIService
 	aiHTMLParser   *AIHTMLParser
+	sentimentQueue *SentimentQueue
 	isRunning      bool
 	currentJobID   string
 	totalCrawled   int
@@ -54,6 +55,12 @@ func (s *CrawlerService) SetAIHTMLParser(parser *AIHTMLParser) {
 		s.crawler.SetAIParser(parser)
 		logger.Info("AI HTML parser enabled for crawler fallback")
 	}
+}
+
+// SetSentimentQueue sets the sentiment queue for async analysis
+func (s *CrawlerService) SetSentimentQueue(queue *SentimentQueue) {
+	s.sentimentQueue = queue
+	logger.Info("Sentiment queue connected to crawler service")
 }
 
 func (s *CrawlerService) StartCrawl(ctx context.Context, source string) (string, error) {
@@ -220,11 +227,14 @@ func (s *CrawlerService) StartCrawlWithOptions(ctx context.Context, source strin
 				savedCount++
 				logger.Info("✅ Successfully saved/updated news: %s (ID: %s, URL: %s)", news.Title, news.ID, news.SourceURL)
 
-				// Auto-analyze sentiment if AI service is available and enabled
-				if s.aiService != nil && s.aiService.cfg != nil && s.aiService.cfg.EnableAutoAnalysis {
+				// Auto-analyze sentiment via queue if available, otherwise fallback to direct goroutine
+				if s.sentimentQueue != nil && s.aiService != nil && s.aiService.cfg != nil && s.aiService.cfg.EnableAutoAnalysis {
+					s.sentimentQueue.Enqueue(news.ID)
+				} else if s.aiService != nil && s.aiService.cfg != nil && s.aiService.cfg.EnableAutoAnalysis {
 					go func(newsID string) {
-						// Use background context for AI analysis too
-						_, err := s.aiService.AnalyzeSentiment(bgCtx, newsID)
+						aiCtx, aiCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+						defer aiCancel()
+						_, err := s.aiService.AnalyzeSentiment(aiCtx, newsID)
 						if err != nil {
 							logger.Warn("Failed to auto-analyze sentiment for news %s: %v", newsID, err)
 						} else {
@@ -450,11 +460,14 @@ func (s *CrawlerService) startCrawlJob(ctx context.Context, source string, optio
 				savedCount++
 				logger.Info("✅ Successfully saved/updated news: %s (ID: %s, URL: %s)", news.Title, news.ID, news.SourceURL)
 
-				// Auto-analyze sentiment if AI service is available and enabled
-				if s.aiService != nil && s.aiService.cfg != nil && s.aiService.cfg.EnableAutoAnalysis {
+				// Auto-analyze sentiment via queue if available, otherwise fallback to direct goroutine
+				if s.sentimentQueue != nil && s.aiService != nil && s.aiService.cfg != nil && s.aiService.cfg.EnableAutoAnalysis {
+					s.sentimentQueue.Enqueue(news.ID)
+				} else if s.aiService != nil && s.aiService.cfg != nil && s.aiService.cfg.EnableAutoAnalysis {
 					go func(newsID string) {
-						// Use background context for AI analysis too
-						_, err := s.aiService.AnalyzeSentiment(bgCtx, newsID)
+						aiCtx, aiCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+						defer aiCancel()
+						_, err := s.aiService.AnalyzeSentiment(aiCtx, newsID)
 						if err != nil {
 							logger.Warn("Failed to auto-analyze sentiment for news %s: %v", newsID, err)
 						} else {

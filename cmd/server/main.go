@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"crawl-news/internal/config"
 	"crawl-news/internal/db"
 	"crawl-news/internal/handler"
@@ -18,8 +20,6 @@ import (
 	"crawl-news/internal/repository"
 	"crawl-news/internal/service"
 	"crawl-news/pkg/logger"
-
-	"github.com/gin-gonic/gin"
 )
 
 func main() {
@@ -60,7 +60,7 @@ func main() {
 	aiService := service.NewAIService(newsRepo, &cfg.AIService)
 	aiHTMLParser := service.NewAIHTMLParser(&cfg.AIService)
 	analyticsService := service.NewAnalyticsService(newsRepo)
-	cronJobService := service.NewCronJobService(crawlerService, newsRepo)
+	cronJobService := service.NewCronJobService(crawlerService, newsRepo, cfg.CronJob.Interval)
 
 	// Connect AI service to crawler for auto-analysis
 	crawlerService.SetAIService(aiService)
@@ -68,10 +68,23 @@ func main() {
 	// Connect AI HTML parser to crawler for fallback parsing
 	crawlerService.SetAIHTMLParser(aiHTMLParser)
 
+	// Initialize and start sentiment queue for async analysis
+	sentimentQueue := service.NewSentimentQueue(
+		aiService,
+		cfg.AIService.QueueSize,
+		cfg.AIService.QueueWorkers,
+		cfg.AIService.QueueMaxRetries,
+	)
+	sentimentQueue.Start()
+	defer sentimentQueue.Stop()
+
+	// Connect sentiment queue to crawler
+	crawlerService.SetSentimentQueue(sentimentQueue)
+
 	// Initialize handlers
 	newsHandler := handler.NewNewsHandler(newsService, crawlerService)
 	crawlerHandler := handler.NewCrawlerHandler(crawlerService)
-	aiHandler := handler.NewAIHandler(aiService, newsService)
+	aiHandler := handler.NewAIHandler(aiService, newsService, sentimentQueue)
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsService)
 	cronJobHandler := handler.NewCronJobHandler(cronJobService)
 	healthHandler := handler.NewHealthHandler()
@@ -178,8 +191,10 @@ func setupRouter(newsHandler *handler.NewsHandler, crawlerHandler *handler.Crawl
 			ai.POST("/price-impact", aiHandler.AnalyzePriceImpact)
 			ai.POST("/analyze", aiHandler.FullAnalysis)
 			ai.POST("/batch-analyze", aiHandler.BatchAnalyze)
+			ai.POST("/reanalyze-all", aiHandler.ReanalyzeAll)
 			ai.GET("/analyzed-news", aiHandler.GetAnalyzedNews)
 			ai.GET("/unanalyzed-news", aiHandler.GetUnanalyzedNews)
+			ai.GET("/queue-stats", aiHandler.QueueStats)
 		}
 
 		// Analytics endpoints

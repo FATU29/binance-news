@@ -12,14 +12,16 @@ import (
 )
 
 type AIHandler struct {
-	aiService   *service.AIService
-	newsService *service.NewsService
+	aiService      *service.AIService
+	newsService    *service.NewsService
+	sentimentQueue *service.SentimentQueue
 }
 
-func NewAIHandler(aiService *service.AIService, newsService *service.NewsService) *AIHandler {
+func NewAIHandler(aiService *service.AIService, newsService *service.NewsService, sentimentQueue *service.SentimentQueue) *AIHandler {
 	return &AIHandler{
-		aiService:   aiService,
-		newsService: newsService,
+		aiService:      aiService,
+		newsService:    newsService,
+		sentimentQueue: sentimentQueue,
 	}
 }
 
@@ -200,4 +202,44 @@ func (h *AIHandler) GetUnanalyzedNews(c *gin.Context) {
 		"total": len(news),
 		"news":  news,
 	})
+}
+
+// ReanalyzeAll godoc
+// @Summary Re-analyze all articles with keyword fallback
+// @Description Re-run AI sentiment analysis on articles that were analyzed with keyword fallback
+// @Tags ai
+// @Produce json
+// @Success 200 {object} httputil.Response
+// @Router /api/v1/ai/reanalyze-all [post]
+func (h *AIHandler) ReanalyzeAll(c *gin.Context) {
+	// Run in background to avoid HTTP timeout
+	go func() {
+		total, success, err := h.aiService.ReanalyzeAll(c.Request.Context())
+		if err != nil {
+			fmt.Printf("Re-analysis failed: %v\n", err)
+			return
+		}
+		fmt.Printf("Re-analysis complete: %d total, %d success, %d failed\n", total, success, total-success)
+	}()
+
+	httputil.SuccessResponse(c, gin.H{
+		"message": "Re-analysis started in background. Check logs for progress.",
+	})
+}
+
+// QueueStats godoc
+// @Summary Get sentiment queue statistics
+// @Description Returns real-time stats of the sentiment analysis queue (pending, processing, completed, failed)
+// @Tags ai
+// @Produce json
+// @Success 200 {object} httputil.Response
+// @Router /api/v1/ai/queue-stats [get]
+func (h *AIHandler) QueueStats(c *gin.Context) {
+	if h.sentimentQueue == nil {
+		httputil.ErrorResponse(c, http.StatusServiceUnavailable, "Sentiment queue not available", nil)
+		return
+	}
+
+	stats := h.sentimentQueue.Stats()
+	httputil.SuccessResponse(c, stats)
 }

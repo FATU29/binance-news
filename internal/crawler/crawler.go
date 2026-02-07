@@ -192,6 +192,22 @@ func (c *Crawler) crawlCoinTelegraph(ctx context.Context, source *model.CrawlSou
 		hash := md5.Sum([]byte(link))
 		id := fmt.Sprintf("ct-%s", hex.EncodeToString(hash[:])[:16])
 
+		// Parse published date from <time datetime="..."> element
+		publishedAt := time.Now()
+		dateTimeAttr := e.ChildAttr("time.post-card-inline__date", "datetime")
+		relativeText := strings.TrimSpace(e.ChildText("time.post-card-inline__date"))
+
+		if dateTimeAttr != "" {
+			// Try parsing the datetime attribute (format: "2026-02-06")
+			if parsed, err := time.Parse("2006-01-02", dateTimeAttr); err == nil {
+				publishedAt = parsed
+				// Try to refine with relative time text (e.g., "3 hours ago", "25 minutes ago")
+				if strings.Contains(relativeText, "ago") {
+					publishedAt = parseRelativeTime(relativeText)
+				}
+			}
+		}
+
 		news := &model.News{
 			ID:          id,
 			Title:       strings.TrimSpace(title),
@@ -201,7 +217,7 @@ func (c *Crawler) crawlCoinTelegraph(ctx context.Context, source *model.CrawlSou
 			ImageURL:    imageURL,
 			Category:    "crypto",
 			Language:    "en",
-			PublishedAt: time.Now(),
+			PublishedAt: publishedAt,
 			CrawledAt:   time.Now(),
 		}
 
@@ -1281,6 +1297,36 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// parseRelativeTime parses relative time strings like "3 hours ago", "25 minutes ago"
+// and returns the approximate absolute time
+func parseRelativeTime(text string) time.Time {
+	now := time.Now()
+	text = strings.ToLower(strings.TrimSpace(text))
+
+	// Try to extract number and unit
+	var num int
+	var unit string
+	_, err := fmt.Sscanf(text, "%d %s", &num, &unit)
+	if err != nil || num <= 0 {
+		return now
+	}
+
+	unit = strings.TrimSuffix(unit, "s") // "hours" -> "hour", "minutes" -> "minute"
+
+	switch unit {
+	case "minute":
+		return now.Add(-time.Duration(num) * time.Minute)
+	case "hour":
+		return now.Add(-time.Duration(num) * time.Hour)
+	case "day":
+		return now.Add(-time.Duration(num) * 24 * time.Hour)
+	case "week":
+		return now.Add(-time.Duration(num) * 7 * 24 * time.Hour)
+	default:
+		return now
+	}
 }
 
 // extractTitle extracts article title with multiple fallback strategies

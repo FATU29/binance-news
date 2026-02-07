@@ -59,6 +59,9 @@ type AIServiceConfig struct {
 	EnableAutoAnalysis bool
 	BatchSize          int
 	ForceAIParsing     bool // Force AI-only parsing (skip rule-based)
+	QueueSize          int  // Buffered channel size for sentiment queue
+	QueueWorkers       int  // Number of concurrent queue workers
+	QueueMaxRetries    int  // Max retries per failed job
 }
 
 type CronJobConfig struct {
@@ -107,10 +110,13 @@ func Load() (*Config, error) {
 			EnableAutoAnalysis: getEnv("AI_AUTO_ANALYZE", "true") == "true",
 			BatchSize:          getEnvAsInt("AI_BATCH_SIZE", 10),
 			ForceAIParsing:     getEnv("AI_FORCE_PARSING", "false") == "true",
+			QueueSize:          getEnvAsInt("AI_QUEUE_SIZE", 500),
+			QueueWorkers:       getEnvAsInt("AI_QUEUE_WORKERS", 3),
+			QueueMaxRetries:    getEnvAsInt("AI_QUEUE_MAX_RETRIES", 2),
 		},
 		CronJob: CronJobConfig{
 			Enabled:  getEnv("CRONJOB_ENABLED", "true") == "true",
-			Interval: getEnv("CRONJOB_INTERVAL", "0 */1 * * * *"), // Default: every hour
+			Interval: getEnv("CRONJOB_INTERVAL", "0 0 0 */1 * *"), // Default: every day at midnight
 		},
 	}
 
