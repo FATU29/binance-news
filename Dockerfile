@@ -9,9 +9,13 @@ WORKDIR /app
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
 
-# Download dependencies (will be cached if go.mod/go.sum unchanged)
+# Download dependencies with retry logic for network issues
 RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download && go mod verify
+    for i in 1 2 3; do \
+      go mod download && go mod verify && break; \
+      echo "Retry $i failed, waiting..."; \
+      sleep 5; \
+    done
 
 # Copy source code
 COPY . .
