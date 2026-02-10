@@ -292,38 +292,51 @@ func (s *AnalyticsService) GetSentimentTrends(ctx context.Context, req *Sentimen
 	var timeFormat string
 	var timeTruncate func(time.Time) time.Time
 	
+	// Use UTC for all time operations to ensure consistency
+	utcLocation := time.UTC
+	
 	switch timeframe {
 	case "hour":
 		timeFormat = "2006-01-02T15:04:05Z"
 		timeTruncate = func(t time.Time) time.Time {
-			return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location())
+			// Convert to UTC first, then truncate
+			utcTime := t.UTC()
+			return time.Date(utcTime.Year(), utcTime.Month(), utcTime.Day(), utcTime.Hour(), 0, 0, 0, utcLocation)
 		}
 	case "day":
 		timeFormat = "2006-01-02"
 		timeTruncate = func(t time.Time) time.Time {
-			return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+			// Convert to UTC first, then truncate
+			utcTime := t.UTC()
+			return time.Date(utcTime.Year(), utcTime.Month(), utcTime.Day(), 0, 0, 0, 0, utcLocation)
 		}
 	case "week":
 		timeFormat = "2006-W01" // ISO week format
 		timeTruncate = func(t time.Time) time.Time {
-			// Get start of week (Monday)
-			weekday := int(t.Weekday())
+			// Convert to UTC first
+			utcTime := t.UTC()
+			// Get start of week (Monday) in UTC
+			weekday := int(utcTime.Weekday())
 			if weekday == 0 {
 				weekday = 7 // Sunday = 7
 			}
 			daysFromMonday := weekday - 1
-			startOfWeek := t.AddDate(0, 0, -daysFromMonday)
-			return time.Date(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), 0, 0, 0, 0, startOfWeek.Location())
+			startOfWeek := utcTime.AddDate(0, 0, -daysFromMonday)
+			return time.Date(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), 0, 0, 0, 0, utcLocation)
 		}
 	case "month":
 		timeFormat = "2006-01"
 		timeTruncate = func(t time.Time) time.Time {
-			return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
+			// Convert to UTC first, then truncate
+			utcTime := t.UTC()
+			return time.Date(utcTime.Year(), utcTime.Month(), 1, 0, 0, 0, 0, utcLocation)
 		}
 	default:
 		timeFormat = "2006-01-02"
 		timeTruncate = func(t time.Time) time.Time {
-			return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+			// Convert to UTC first, then truncate
+			utcTime := t.UTC()
+			return time.Date(utcTime.Year(), utcTime.Month(), utcTime.Day(), 0, 0, 0, 0, utcLocation)
 		}
 	}
 
@@ -344,8 +357,9 @@ func (s *AnalyticsService) GetSentimentTrends(ctx context.Context, req *Sentimen
 
 		// Initialize trend if not exists
 		if trendsMap[timeKeyStr] == nil {
+			// Format time in UTC with Z suffix to ensure frontend parses correctly
 			trendsMap[timeKeyStr] = &SentimentTrend{
-				Time: truncatedTime.Format(time.RFC3339),
+				Time: truncatedTime.Format(time.RFC3339), // This will format as UTC with Z suffix
 			}
 		}
 
